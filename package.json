@@ -1,0 +1,20 @@
+smart-secure-city/
+├── .env.local                  # Konfigurasi Firebase & Secret Dosen
+├── package.json
+├── next.config.mjs
+└── src/
+    ├── lib/
+    │   ├── firebaseClient.js   # Koneksi Firebase untuk UI & Real-time Dashboard
+    │   ├── firebaseAdmin.js    # Koneksi Firebase Admin (Server-side Anti-Cheat)
+    │   └── questionBank.js     # Bank soal 10 gedung x 2 level x 3 soal (Hanya di Server!)
+    ├── components/
+    │   └── RobloxCityMap.jsx   # Peta 3D Low-Poly ala Roblox (Ringan untuk Mobile)
+    └── app/
+        ├── page.js             # Halaman Login Mahasiswa (Scan QR / Link + NIM + Token)
+        ├── game/
+        │   └── page.js         # Arena 3D Smart Secure City & Kuis Mahasiswa
+        ├── lecturer/
+        │   └── page.js         # Dashboard Dosen Real-time, Generator Token/QR & Ekspor CSV
+        └── api/
+            ├── session/route.js # Validasi & Generate Session Token Terikat NIM
+            └── submit/route.js  # Validasi Jawaban & Skor Server-Side (Anti-Tamper)
