@@ -1,190 +1,439 @@
 "use client";
-import { useState, useEffect } from "react";
-import { collection, onSnapshot, query, orderBy } from "firebase/firestore";
-import { db } from "@/lib/firebaseClient";
-import { getAvatarById } from "@/lib/avatars";
-import { QRCodeSVG } from "qrcode.react";
-import { Download, QrCode, Users, Activity, RefreshCw } from "lucide-react";
 
-export default function LecturerDashboard() {
-  const [adminKey, setAdminKey] = useState("");
-  const [authenticated, setAuthenticated] = useState(false);
+import React, { useEffect, useState, useMemo } from "react";
+import {
+  Trophy,
+  Medal,
+  Users,
+  Lock,
+  CheckCircle2,
+  RefreshCw,
+  Download,
+  Search,
+  KeyRound,
+  QrCode
+} from "lucide-react";
+
+export default function LecturerDashboardPage() {
+  const [adminKeyInput, setAdminKeyInput] = useState("");
+  const [authorizedKey, setAuthorizedKey] = useState("");
+  const [loadingAuth, setLoadingAuth] = useState(false);
+  const [authError, setAuthError] = useState("");
+
   const [sessionInfo, setSessionInfo] = useState(null);
   const [students, setStudents] = useState([]);
-  const [selectedStudentLog, setSelectedStudentLog] = useState(null);
-  const [loading, setLoading] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [statusFilter, setStatusFilter] = useState("all");
+  const [selectedStudent, setSelectedStudent] = useState(null);
+  const [confirmNewSession, setConfirmNewSession] = useState(false);
 
-  useEffect(() => {
-    if (!authenticated) return;
-    const q = query(collection(db, "students"), orderBy("totalScore", "desc"));
-    const unsub = onSnapshot(q, (snap) => {
-      setStudents(snap.docs.map((d) => d.data()));
-    });
-    return () => unsub();
-  }, [authenticated]);
-
-  const handleGenerateSession = async () => {
-    setLoading(true);
+  const createOrRefreshSession = async (keyToUse, forceNew = false) => {
+    setLoadingAuth(true);
+    setAuthError("");
     try {
       const res = await fetch("/api/session", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "generate_class_session", adminKey }),
+        body: JSON.stringify({
+          action: "generate_class_session",
+          adminKey: keyToUse,
+          forceNew
+        })
       });
       const data = await res.json();
       if (!res.ok) {
-        alert(data.error || "Kunci dosen salah.");
+        setAuthError(data.error || "Kunci akses dosen tidak valid.");
+        setLoadingAuth(false);
         return;
       }
-      setAuthenticated(true);
-      setSessionInfo(data);
+      setAuthorizedKey(keyToUse);
+      setSessionInfo(data.session || data);
+      if (Array.isArray(data.students)) {
+        setStudents(data.students);
+      }
+    } catch {
+      setAuthError("Terjadi kesalahan pada server saat menghubungkan sesi.");
     } finally {
-      setLoading(false);
+      setLoadingAuth(false);
+      setConfirmNewSession(false);
     }
   };
 
-  const exportCSV = () => {
+  useEffect(() => {
+    if (!authorizedKey) return;
+    const poll = async () => {
+      try {
+        const res = await fetch(`/api/submit?adminKey=${encodeURIComponent(authorizedKey)}`);
+        if (res.ok) {
+          const data = await res.json();
+          if (Array.isArray(data.students)) setStudents(data.students);
+          if (data.session) setSessionInfo(data.session);
+        }
+      } catch {
+        // abaikan error polling sesaat
+      }
+    };
+    poll();
+    const interval = setInterval(poll, 4000);
+    return () => clearInterval(interval);
+  }, [authorizedKey]);
+
+  const topThreeStudents = useMemo(() => {
+    return [...students]
+      .sort((a, b) => {
+        const scoreDiff = Number(b.score || 0) - Number(a.score || 0);
+        if (scoreDiff !== 0) return scoreDiff;
+        const doneDiff =
+          (b.completedBuildings?.length || 0) - (a.completedBuildings?.length || 0);
+        if (doneDiff !== 0) return doneDiff;
+        return String(a.nim || "").localeCompare(String(b.nim || ""));
+      })
+      .slice(0, 3);
+  }, [students]);
+
+  const filteredStudents = useMemo(() => {
+    return students.filter((s) => {
+      const q = searchQuery.trim().toLowerCase();
+      const matchQuery =
+        !q ||
+        String(s.nim || "").toLowerCase().includes(q) ||
+        String(s.nama || "").toLowerCase().includes(q);
+
+      const lockedCount = (s.lockedBuildings || []).length;
+      if (statusFilter === "locked") return matchQuery && lockedCount > 0;
+      if (statusFilter === "completed")
+        return matchQuery && (s.completedBuildings || []).length > 0;
+      return matchQuery;
+    });
+  }, [students, searchQuery, statusFilter]);
+
+  const avgScore = useMemo(() => {
+    if (!students.length) return 0;
+    const total = students.reduce((acc, s) => acc + Number(s.score || 0), 0);
+    return (total / students.length).toFixed(1);
+  }, [students]);
+
+  const exportCsv = () => {
     const headers = [
+      "Peringkat",
       "NIM",
       "Nama",
-      "Avatar Hewan",
-      "Skor (Maks 100)",
-      "Gedung Dimasuki",
-      "Gedung Terkunci/Gagal",
-      "Aktivitas Terakhir"
+      "Skor",
+      "Gedung Tuntas",
+      "Gedung Terkunci"
     ];
-
-    const rows = students.map((s) => {
-      const av = getAvatarById(s.avatarId);
-      return [
-        `"${s.nim}"`,
-        `"${s.nama}"`,
-        `"${av.name}"`,
-        s.totalScore || 0,
-        `"${(s.visitedBuildings || []).join(";")}"`,
-        `"${(s.lockedBuildings || []).join(";")}"`,
-        `"${s.lastActive ? new Date(s.lastActive).toLocaleString("id-ID") : "-"}"`
-      ].join(",");
-    });
-
-    const csv = "data:text/csv;charset=utf-8," + [headers.join(","), ...rows].join("\n");
-    const link = document.createElement("a");
-    link.setAttribute("href", encodeURI(csv));
-    link.setAttribute("download", `Rekap_SmartSecureCity_${new Date().toISOString().slice(0, 10)}.csv`);
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+    const sorted = [...students].sort((a, b) => Number(b.score || 0) - Number(a.score || 0));
+    const rows = sorted.map((s, idx) => [
+      idx + 1,
+      `"${s.nim || ""}"`,
+      `"${(s.nama || "").replace(/"/g, '""')}"`,
+      Number(s.score || 0),
+      (s.completedBuildings || []).length,
+      (s.lockedBuildings || []).length
+    ]);
+    const csv = [headers.join(","), ...rows.map((r) => r.join(","))].join("\n");
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `rekap-smart-secure-city-${sessionInfo?.classCode || "sesi"}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
   };
 
-  if (!authenticated) {
+  if (!authorizedKey) {
     return (
-      <div className="min-h-screen bg-slate-950 text-white flex items-center justify-center p-4">
-        <div className="w-full max-w-md bg-slate-900 border border-slate-800 rounded-2xl p-6 space-y-4">
-          <h1 className="text-xl font-bold">Dashboard Dosen — Smart Secure City</h1>
-          <input
-            type="password"
-            placeholder="Kunci Admin Dosen"
-            value={adminKey}
-            onChange={(e) => setAdminKey(e.target.value)}
-            className="w-full px-3.5 py-2.5 rounded-xl bg-slate-800 border border-slate-700 text-white"
-          />
-          <button
-            onClick={handleGenerateSession}
-            disabled={loading}
-            className="w-full py-3 rounded-xl bg-blue-600 hover:bg-blue-500 font-semibold"
+      <div className="min-h-screen w-full bg-gradient-to-br from-sky-100 via-teal-50 to-amber-50 flex items-center justify-center p-4">
+        <div className="w-full max-w-md rounded-3xl border border-sky-200 bg-white p-7 shadow-xl">
+          <div className="flex items-center gap-3 mb-5">
+            <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-sky-600 text-white shadow-md">
+              <KeyRound className="h-5 w-5" />
+            </div>
+            <div>
+              <h1 className="text-lg font-extrabold text-slate-900">
+                Dashboard Dosen — Smart Secure City
+              </h1>
+              <p className="text-xs text-slate-500">
+                Masukkan kunci admin untuk membuka sesi kelas
+              </p>
+            </div>
+          </div>
+
+          {authError && (
+            <div className="mb-4 rounded-xl border border-rose-200 bg-rose-50 px-3.5 py-2.5 text-xs font-semibold text-rose-800">
+              {authError}
+            </div>
+          )}
+
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              createOrRefreshSession(adminKeyInput, false);
+            }}
+            className="space-y-4"
           >
-            {loading ? "Memproses..." : "Buka Dashboard & Buat Sesi QR"}
-          </button>
+            <div>
+              <label className="block text-xs font-bold text-slate-700 mb-1.5">
+                Kunci Akses Dosen (`LECTURER_ADMIN_KEY`)
+              </label>
+              <input
+                type="password"
+                required
+                value={adminKeyInput}
+                onChange={(e) => setAdminKeyInput(e.target.value)}
+                placeholder="Masukkan kunci admin..."
+                className="w-full rounded-xl border border-slate-300 px-3.5 py-2.5 text-sm text-slate-900 focus:border-sky-500 focus:outline-none"
+              />
+            </div>
+
+            <button
+              type="submit"
+              disabled={loadingAuth}
+              className="w-full rounded-xl bg-gradient-to-r from-sky-600 to-teal-600 py-2.5 text-sm font-extrabold text-white shadow-md hover:brightness-105 disabled:opacity-60 cursor-pointer"
+            >
+              {loadingAuth ? "Memproses..." : "Buka Dashboard & Buat Sesi QR"}
+            </button>
+          </form>
         </div>
       </div>
     );
   }
 
-  const loginUrl =
-    typeof window !== "undefined" && sessionInfo
-      ? `${window.location.origin}/?code=${sessionInfo.classCode}`
-      : "";
+  const classCode = sessionInfo?.classCode || "SEC-AKTIF";
+  const joinUrl =
+    typeof window !== "undefined"
+      ? `${window.location.origin}/?code=${encodeURIComponent(classCode)}`
+      : `/?code=${classCode}`;
+  const qrImageUrl = `https://api.qrserver.com/v1/create-qr-code/?size=220x220&data=${encodeURIComponent(
+    joinUrl
+  )}`;
+
+  const medalStyles = [
+    "from-amber-100 to-yellow-50 border-amber-300 text-amber-900",
+    "from-slate-100 to-sky-50 border-slate-300 text-slate-800",
+    "from-orange-100 to-amber-50 border-orange-300 text-orange-900"
+  ];
 
   return (
-    <div className="min-h-screen bg-slate-950 text-white p-6">
-      <div className="max-w-7xl mx-auto space-y-6">
-        <div className="grid md:grid-cols-3 gap-6 bg-slate-900 border border-slate-800 rounded-2xl p-6">
-          <div className="md:col-span-2 space-y-3">
-            <div className="flex items-center gap-2 text-blue-400 text-sm font-semibold">
-              <QrCode className="w-5 h-5" /> Sesi Aktif Perkuliahan
+    <div className="min-h-screen w-full bg-gradient-to-br from-sky-100 via-teal-50 to-amber-50 text-slate-900 px-4 lg:px-8 py-6">
+      <div className="w-full space-y-6">
+        {/* Kartu Sesi & QR Code */}
+        <div className="rounded-3xl border border-sky-200 bg-white p-6 shadow-md grid grid-cols-1 lg:grid-cols-12 gap-6 items-center">
+          <div className="lg:col-span-8 space-y-3">
+            <div className="inline-flex items-center gap-1.5 rounded-full bg-sky-100 px-3 py-1 text-xs font-extrabold text-sky-800">
+              <QrCode className="h-3.5 w-3.5" />
+              Sesi Aktif Perkuliahan
             </div>
-            <h1 className="text-2xl font-bold">
-              Kode Sesi: <span className="font-mono text-amber-400">{sessionInfo?.classCode}</span>
-            </h1>
-            <p className="text-xs font-mono bg-slate-950 p-3 rounded-xl border border-slate-800 break-all">
-              {loginUrl}
-            </p>
-            <div className="flex gap-3">
+            <div className="text-2xl lg:text-3xl font-black tracking-tight text-slate-900">
+              Kode Sesi: <span className="text-amber-600">{classCode}</span>
+            </div>
+            <div className="rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-2 text-xs font-mono text-slate-700 break-all">
+              {joinUrl}
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2.5 pt-1">
               <button
-                onClick={handleGenerateSession}
-                className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs font-semibold flex items-center gap-2"
+                type="button"
+                onClick={() => setConfirmNewSession(true)}
+                className="inline-flex items-center gap-1.5 rounded-xl border border-slate-300 bg-white px-4 py-2 text-xs font-bold text-slate-800 hover:bg-slate-50 cursor-pointer"
               >
-                <RefreshCw className="w-4 h-4" /> Ganti Sesi Baru
+                <RefreshCw className="h-3.5 w-3.5" />
+                Ganti Sesi Baru
               </button>
               <button
-                onClick={exportCSV}
-                className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-xs font-semibold flex items-center gap-2"
+                type="button"
+                onClick={exportCsv}
+                className="inline-flex items-center gap-1.5 rounded-xl bg-emerald-600 px-4 py-2 text-xs font-extrabold text-white shadow-xs hover:bg-emerald-700 cursor-pointer"
               >
-                <Download className="w-4 h-4" /> Ekspor CSV / Excel
+                <Download className="h-3.5 w-3.5" />
+                Ekspor CSV / Excel
               </button>
             </div>
           </div>
-          <div className="flex flex-col items-center justify-center bg-white p-4 rounded-2xl">
-            {loginUrl && <QRCodeSVG value={loginUrl} size={160} />}
-            <span className="text-slate-900 font-mono font-bold text-xs mt-2">{sessionInfo?.classCode}</span>
+
+          <div className="lg:col-span-4 flex flex-col items-center justify-center rounded-2xl border border-slate-200 bg-slate-50/70 p-4">
+            <img
+              src={qrImageUrl}
+              alt={`QR Sesi ${classCode}`}
+              className="h-40 w-40 rounded-xl bg-white p-2 shadow-xs border border-slate-200"
+            />
+            <span className="mt-2 text-xs font-extrabold tracking-wider text-slate-700">
+              {classCode}
+            </span>
           </div>
         </div>
 
-        <div className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden">
-          <div className="p-4 border-b border-slate-800 flex items-center justify-between">
-            <div className="flex items-center gap-2 font-bold">
-              <Users className="w-5 h-5 text-blue-400" />
-              Pantauan Real-Time ({students.length} Mahasiswa)
+        {/* Ringkasan Kelas */}
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          <div className="rounded-2xl border border-sky-200 bg-white p-4 shadow-xs flex items-center gap-3">
+            <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-sky-100 text-sky-700">
+              <Users className="h-5 w-5" />
             </div>
-            <span className="text-xs text-emerald-400">● Live Firestore</span>
+            <div>
+              <div className="text-xs font-semibold text-slate-500">Total Mahasiswa</div>
+              <div className="text-xl font-black text-slate-900">{students.length}</div>
+            </div>
+          </div>
+
+          <div className="rounded-2xl border border-amber-200 bg-white p-4 shadow-xs flex items-center gap-3">
+            <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-amber-100 text-amber-700">
+              <Trophy className="h-5 w-5" />
+            </div>
+            <div>
+              <div className="text-xs font-semibold text-slate-500">Rata-Rata Poin Kelas</div>
+              <div className="text-xl font-black text-slate-900">{avgScore} / 100</div>
+            </div>
+          </div>
+
+          <div className="rounded-2xl border border-rose-200 bg-white p-4 shadow-xs flex items-center gap-3">
+            <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-rose-100 text-rose-700">
+              <Lock className="h-5 w-5" />
+            </div>
+            <div>
+              <div className="text-xs font-semibold text-slate-500">Mahasiswa Pernah Terkunci</div>
+              <div className="text-xl font-black text-slate-900">
+                {students.filter((s) => (s.lockedBuildings || []).length > 0).length}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Top 3 Nilai Tertinggi */}
+        <section className="rounded-3xl border border-amber-200 bg-white p-6 shadow-md">
+          <div className="flex items-center justify-between gap-2 mb-4">
+            <div className="flex items-center gap-2">
+              <Medal className="h-5 w-5 text-amber-500" />
+              <h2 className="text-base font-extrabold text-slate-900">
+                Top 3 Nilai Tertinggi
+              </h2>
+            </div>
+            <span className="text-xs font-semibold text-slate-500">
+              Diurutkan berdasarkan poin tertinggi
+            </span>
+          </div>
+
+          {topThreeStudents.length === 0 ? (
+            <p className="text-xs text-slate-500 py-4">
+              Belum ada data nilai mahasiswa pada sesi ini.
+            </p>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              {topThreeStudents.map((s, idx) => (
+                <div
+                  key={s.id || s.nim || idx}
+                  className={`rounded-2xl border bg-gradient-to-br p-4 shadow-xs ${
+                    medalStyles[idx] || medalStyles[2]
+                  }`}
+                >
+                  <div className="flex items-center justify-between">
+                    <span className="rounded-full bg-white/90 px-2.5 py-0.5 text-xs font-black shadow-2xs">
+                      Peringkat #{idx + 1}
+                    </span>
+                    <span className="text-lg font-black">{Number(s.score || 0)}/100</span>
+                  </div>
+                  <div className="mt-3 flex items-center gap-2.5">
+                    <span className="text-2xl">{s.avatar?.emoji || "🦊"}</span>
+                    <div className="min-w-0">
+                      <div className="font-extrabold text-sm truncate">{s.nama}</div>
+                      <div className="text-xs opacity-80 truncate">NIM: {s.nim}</div>
+                    </div>
+                  </div>
+                  <div className="mt-3 text-[11px] font-bold flex items-center justify-between">
+                    <span>Gedung Aman: {(s.completedBuildings || []).length}/10</span>
+                    <span>Terkunci: {(s.lockedBuildings || []).length}</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </section>
+
+        {/* Tabel Pantauan Real-Time */}
+        <section className="rounded-3xl border border-sky-200 bg-white p-6 shadow-md">
+          <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
+            <div className="flex items-center gap-2">
+              <Users className="h-5 w-5 text-sky-600" />
+              <h2 className="text-base font-extrabold text-slate-900">
+                Pantauan Real-Time ({filteredStudents.length} Mahasiswa)
+              </h2>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="relative">
+                <Search className="h-3.5 w-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                <input
+                  type="text"
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  placeholder="Cari NIM / Nama..."
+                  className="rounded-xl border border-slate-300 pl-8 pr-3 py-1.5 text-xs focus:border-sky-500 focus:outline-none"
+                />
+              </div>
+
+              <select
+                value={statusFilter}
+                onChange={(e) => setStatusFilter(e.target.value)}
+                className="rounded-xl border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 focus:border-sky-500 focus:outline-none"
+              >
+                <option value="all">Semua Status</option>
+                <option value="completed">Sudah Tuntas Gedung</option>
+                <option value="locked">Ada Gedung Terkunci</option>
+              </select>
+            </div>
           </div>
 
           <div className="overflow-x-auto">
-            <table className="w-full text-left text-sm">
-              <thead className="bg-slate-950 text-slate-400 text-xs uppercase">
-                <tr>
-                  <th className="p-3.5">Avatar</th>
-                  <th className="p-3.5">NIM</th>
-                  <th className="p-3.5">Nama</th>
-                  <th className="p-3.5">Poin</th>
-                  <th className="p-3.5">Gedung Dimasuki</th>
-                  <th className="p-3.5">Terkunci (Salah 3x)</th>
-                  <th className="p-3.5">Log</th>
+            <table className="w-full text-left border-collapse text-xs">
+              <thead>
+                <tr className="border-b border-slate-200 text-slate-500 uppercase text-[11px]">
+                  <th className="py-3 px-3">Avatar</th>
+                  <th className="py-3 px-3">NIM</th>
+                  <th className="py-3 px-3">Nama</th>
+                  <th className="py-3 px-3">Poin</th>
+                  <th className="py-3 px-3">Gedung Dimasuki</th>
+                  <th className="py-3 px-3">Terkunci (Salah 3x)</th>
+                  <th className="py-3 px-3">Log</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-slate-800">
-                {students.map((s) => {
-                  const av = getAvatarById(s.avatarId);
+              <tbody className="divide-y divide-slate-100">
+                {filteredStudents.map((s, idx) => {
+                  const completed = s.completedBuildings || [];
+                  const locked = s.lockedBuildings || [];
+                  const enteredCount = new Set([
+                    ...completed,
+                    ...locked,
+                    ...Object.keys(s.buildingMistakes || {})
+                  ]).size;
+
                   return (
-                    <tr key={s.nim} className="hover:bg-slate-800/40">
-                      <td className="p-3.5 text-xl" title={av.name}>
-                        {av.emoji}
+                    <tr key={s.id || s.nim || idx} className="hover:bg-sky-50/50">
+                      <td className="py-3 px-3 text-lg">{s.avatar?.emoji || "🦊"}</td>
+                      <td className="py-3 px-3 font-mono font-semibold text-slate-700">
+                        {s.nim}
                       </td>
-                      <td className="p-3.5 font-mono text-xs">{s.nim}</td>
-                      <td className="p-3.5 font-medium">{s.nama}</td>
-                      <td className="p-3.5 font-bold text-amber-400">{s.totalScore || 0}/100</td>
-                      <td className="p-3.5 text-xs">
-                        {(s.visitedBuildings || []).length}/10 ({(s.visitedBuildings || []).join(", ") || "-"})
+                      <td className="py-3 px-3 font-bold text-slate-900">{s.nama}</td>
+                      <td className="py-3 px-3 font-black text-amber-600">
+                        {Number(s.score || 0)}/100
                       </td>
-                      <td className="p-3.5 text-xs text-red-400">
-                        {(s.lockedBuildings || []).join(", ") || "-"}
+                      <td className="py-3 px-3 font-semibold text-slate-700">
+                        {enteredCount}/10 (Aman: {completed.length})
                       </td>
-                      <td className="p-3.5">
+                      <td className="py-3 px-3">
+                        {locked.length > 0 ? (
+                          <span className="inline-flex items-center gap-1 rounded-full bg-rose-100 px-2.5 py-0.5 text-[11px] font-bold text-rose-700">
+                            {locked.length} gedung
+                          </span>
+                        ) : (
+                          <span className="text-slate-400">-</span>
+                        )}
+                      </td>
+                      <td className="py-3 px-3">
                         <button
-                          onClick={() => setSelectedStudentLog(s)}
-                          className="text-xs text-blue-400 hover:underline flex items-center gap-1"
+                          type="button"
+                          onClick={() => setSelectedStudent(s)}
+                          className="font-bold text-sky-600 hover:underline cursor-pointer"
                         >
-                          <Activity className="w-3.5 h-3.5" /> Detail
+                          Detail
                         </button>
                       </td>
                     </tr>
@@ -193,31 +442,88 @@ export default function LecturerDashboard() {
               </tbody>
             </table>
           </div>
-        </div>
+        </section>
+      </div>
 
-        {selectedStudentLog && (
-          <div className="fixed inset-0 bg-black/70 flex items-center justify-center p-4 z-50">
-            <div className="bg-slate-900 border border-slate-700 rounded-2xl max-w-lg w-full p-5 space-y-3">
-              <div className="flex justify-between items-center">
-                <h3 className="font-bold">
-                  Log: {selectedStudentLog.nama} ({selectedStudentLog.nim})
-                </h3>
-                <button onClick={() => setSelectedStudentLog(null)} className="text-slate-400 hover:text-white">
-                  Tutup ✕
-                </button>
-              </div>
-              <div className="max-h-72 overflow-y-auto space-y-2 text-xs font-mono bg-slate-950 p-3 rounded-xl">
-                {(selectedStudentLog.activityLogs || []).slice().reverse().map((log, i) => (
-                  <div key={i} className="border-b border-slate-800 pb-1.5">
-                    <span className="text-slate-500">[{new Date(log.time).toLocaleTimeString("id-ID")}]</span>{" "}
-                    <span>{log.event}</span>
-                  </div>
-                ))}
-              </div>
+      {/* Konfirmasi Ganti Sesi Baru */}
+      {confirmNewSession && (
+        <div className="fixed inset-0 z-40 flex items-center justify-center bg-slate-900/50 p-4">
+          <div className="w-full max-w-md rounded-3xl bg-white p-6 shadow-xl border border-slate-200">
+            <h3 className="text-base font-extrabold text-slate-900">
+              Buat Kode Sesi Kuliah Baru?
+            </h3>
+            <p className="mt-2 text-xs text-slate-600">
+              Kode sesi aktif sebelumnya akan digantikan oleh kode baru. Pastikan mahasiswa yang sedang login diarahkan ke kode sesi terbaru.
+            </p>
+            <div className="mt-5 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setConfirmNewSession(false)}
+                className="rounded-xl border border-slate-300 px-4 py-2 text-xs font-bold text-slate-700 cursor-pointer"
+              >
+                Batal
+              </button>
+              <button
+                type="button"
+                onClick={() => createOrRefreshSession(authorizedKey, true)}
+                className="rounded-xl bg-sky-600 px-4 py-2 text-xs font-extrabold text-white cursor-pointer"
+              >
+                Ya, Ganti Sesi
+              </button>
             </div>
           </div>
-        )}
-      </div>
+        </div>
+      )}
+
+      {/* Modal Detail Log Mahasiswa */}
+      {selectedStudent && (
+        <div className="fixed inset-0 z-40 flex items-center justify-center bg-slate-900/50 p-4">
+          <div className="w-full max-w-lg rounded-3xl bg-white p-6 shadow-xl border border-slate-200 max-h-[85vh] overflow-y-auto">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+              <div>
+                <h3 className="text-base font-extrabold text-slate-900">
+                  {selectedStudent.nama} ({selectedStudent.nim})
+                </h3>
+                <p className="text-xs text-slate-500">
+                  Skor: {Number(selectedStudent.score || 0)}/100
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setSelectedStudent(null)}
+                className="rounded-lg bg-slate-100 px-3 py-1 text-xs font-bold text-slate-700 cursor-pointer"
+              >
+                Tutup
+              </button>
+            </div>
+
+            <div className="mt-4 space-y-2">
+              {(selectedStudent.logs || []).length === 0 ? (
+                <p className="text-xs text-slate-500">Belum ada riwayat jawaban tercatat.</p>
+              ) : (
+                (selectedStudent.logs || []).map((log, i) => (
+                  <div
+                    key={i}
+                    className="flex items-center justify-between rounded-xl border border-slate-100 bg-slate-50 px-3 py-2 text-xs"
+                  >
+                    <div>
+                      <span className="font-bold text-slate-800">{log.buildingName}</span>{" "}
+                      <span className="text-slate-500">({log.level})</span>
+                    </div>
+                    <span
+                      className={`font-extrabold ${
+                        log.result === "BENAR" ? "text-emerald-600" : "text-rose-600"
+                      }`}
+                    >
+                      {log.result}
+                    </span>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
