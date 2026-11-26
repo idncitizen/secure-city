@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import crypto from "crypto";
-import { adminDb } from "@/lib/firebaseAdmin";
+import { getAdminDb } from "@/lib/firebaseAdmin";
 import { getAvatarById } from "@/lib/avatars";
 
 export async function POST(req) {
@@ -15,7 +15,7 @@ export async function POST(req) {
       }
       const newClassCode = "SEC-" + crypto.randomBytes(3).toString("hex").toUpperCase();
       const expiresAt = Date.now() + 3 * 60 * 60 * 1000;
-
+      const adminDb = getAdminDb();
       await adminDb.collection("system").doc("active_session").set({
         classCode: newClassCode,
         expiresAt,
