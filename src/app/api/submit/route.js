@@ -1,213 +1,169 @@
 import { NextResponse } from "next/server";
 import { getAdminDb } from "@/lib/firebaseAdmin";
-import {
-  BUILDINGS_DATA,
-  MAX_WRONG_ATTEMPTS_PER_BUILDING,
-  getSafeBuildingsForClient,
-} from "@/lib/questionBank";
-
-export async function GET(req) {
-  const { searchParams } = new URL(req.url);
-  const nim = searchParams.get("nim")?.toUpperCase();
-  const token = searchParams.get("token");
-
-  if (!nim || !token) {
-    return NextResponse.json({ error: "Autentikasi diperlukan." }, { status: 401 });
-  }
-  const adminDb = getAdminDb();
-  const snap = await adminDb.collection("students").doc(nim).get();
-  if (!snap.exists || snap.data().sessionToken !== token) {
-    return NextResponse.json({ error: "Session token tidak valid atau sesi digantikan." }, { status: 401 });
-  }
-
-  const s = snap.data();
-  return NextResponse.json({
-    buildings: getSafeBuildingsForClient(),
-    progress: {
-      nim: s.nim,
-      nama: s.nama,
-      avatarId: s.avatarId || "fox",
-      totalScore: s.totalScore || 0,
-      activeBuildingId: s.activeBuildingId ?? null,
-      visitedBuildings: s.visitedBuildings || [],
-      lockedBuildings: s.lockedBuildings || [],
-      completedBuildings: s.completedBuildings || [],
-      buildingWrongAttempts: s.buildingWrongAttempts || {},
-      completedQuestions: s.completedQuestions || {},
-    },
-  });
-}
+import { getBuildingById, getOrderedQuestions } from "@/lib/buildings";
 
 export async function POST(req) {
   try {
-    const body = await req.json();
-    const { nim, token, action, buildingId, level, questionId, selectedOption } = body;
-
-    if (!nim || !token) {
-      return NextResponse.json({ error: "Sesi tidak lengkap." }, { status: 401 });
-    }
     const adminDb = getAdminDb();
-    const cleanNim = String(nim).trim().toUpperCase();
-    const studentRef = adminDb.collection("students").doc(cleanNim);
-    const snap = await studentRef.get();
+    const body = await req.json();
+    const {
+      sessionToken,
+      action,
+      buildingId,
+      questionId,
+      selectedIndex,
+      timedOut = false
+    } = body;
 
-    if (!snap.exists || snap.data().sessionToken !== token) {
-      return NextResponse.json({ error: "Sesi tidak sah. Silakan login kembali." }, { status: 401 });
+    if (!sessionToken) {
+      return NextResponse.json({ error: "Token sesi tidak ditemukan." }, { status: 401 });
     }
 
-    const student = snap.data();
-    const nowIso = new Date().toISOString();
-    const prevLogs = student.activityLogs || [];
+    const studentsSnap = await adminDb
+      .collection("students")
+      .where("sessionToken", "==", sessionToken)
+      .limit(1)
+      .get();
 
-    // Mahasiswa keluar secara sukarela dari gedung aktif (tidak bisa masuk lagi)
+    if (studentsSnap.empty) {
+      return NextResponse.json({ error: "Sesi mahasiswa tidak valid." }, { status: 401 });
+    }
+
+    const studentDoc = studentsSnap.docs[0];
+    const studentData = studentDoc.data();
+
+    const completedBuildings = Array.isArray(studentData.completedBuildings)
+      ? [...studentData.completedBuildings]
+      : [];
+    const lockedBuildings = Array.isArray(studentData.lockedBuildings)
+      ? [...studentData.lockedBuildings]
+      : [];
+    const answeredCorrectIds = Array.isArray(studentData.answeredCorrectIds)
+      ? [...studentData.answeredCorrectIds]
+      : [];
+    const buildingMistakes = { ...(studentData.buildingMistakes || {}) };
+    const logs = Array.isArray(studentData.logs) ? [...studentData.logs] : [];
+
     if (action === "exit_building") {
-      const activeId = student.activeBuildingId;
-      if (!activeId) {
-        return NextResponse.json({ error: "Tidak sedang berada di dalam gedung." }, { status: 400 });
-      }
-      const completedBuildings = student.completedBuildings || [];
-      const updatedCompleted = completedBuildings.includes(activeId)
-        ? completedBuildings
-        : [...completedBuildings, activeId];
-
-      await studentRef.update({
-        activeBuildingId: null,
-        completedBuildings: updatedCompleted,
-        lastActive: nowIso,
-        activityLogs: [
-          ...prevLogs.slice(-39),
-          { time: nowIso, event: `Keluar dari Gedung ${activeId} (akses gedung selesai)` }
-        ],
-      });
-
+      await studentDoc.ref.set(
+        {
+          activeBuildingId: null,
+          lastActiveAt: new Date().toISOString()
+        },
+        { merge: true }
+      );
       return NextResponse.json({
-        ejected: true,
-        reason: "Anda keluar dari gedung. Gedung ini tidak dapat dimasuki kembali.",
+        success: true,
         activeBuildingId: null,
+        score: Number(studentData.score || 0),
+        completedBuildings,
+        lockedBuildings,
+        buildingMistakes
       });
     }
 
-    // Validasi jawaban pilihan ganda (A-E => 0-4)
-    const bId = Number(buildingId);
-    if (student.activeBuildingId !== bId) {
+    const building = getBuildingById(buildingId);
+    if (!building) {
+      return NextResponse.json({ error: "Gedung tidak ditemukan." }, { status: 404 });
+    }
+
+    if (lockedBuildings.includes(building.id)) {
       return NextResponse.json(
-        { error: "Anda tidak berada di dalam gedung ini atau sudah terlempar keluar." },
+        { error: "Gedung ini sudah terkunci karena 3x kesalahan.", ejected: true, lockedBuildings },
         { status: 403 }
       );
     }
 
-    const lockedBuildings = student.lockedBuildings || [];
-    if (lockedBuildings.includes(bId)) {
-      return NextResponse.json(
-        { error: "Kesempatan di gedung ini sudah habis." },
-        { status: 403 }
-      );
+    const orderedQuestions = getOrderedQuestions(building);
+    const question = orderedQuestions.find((q) => q.id === questionId);
+    if (!question) {
+      return NextResponse.json({ error: "Pertanyaan tidak ditemukan." }, { status: 400 });
     }
 
-    if (typeof selectedOption !== "number" || selectedOption < 0 || selectedOption > 4) {
-      return NextResponse.json({ error: "Pilihan jawaban harus antara A sampai E." }, { status: 400 });
-    }
-
-    const building = BUILDINGS_DATA.find((b) => b.id === bId);
-    const levelQuestions = building?.levels?.[level];
-    const question = levelQuestions?.find((q) => q.id === questionId);
-
-    if (!building || !question) {
-      return NextResponse.json({ error: "Soal tidak ditemukan." }, { status: 404 });
-    }
-
-    const completedQuestions = { ...(student.completedQuestions || {}) };
-    if (completedQuestions[questionId]?.correct) {
-      return NextResponse.json({ error: "Soal ini sudah dijawab benar sebelumnya." }, { status: 400 });
-    }
-
-    const wrongMap = { ...(student.buildingWrongAttempts || {}) };
-    let wrongCount = wrongMap[bId] || 0;
-    const isCorrect = selectedOption === question.answer;
-
-    let addedScore = 0;
+    const isCorrect = !timedOut && Number(selectedIndex) === Number(question.correctIndex);
+    let currentScore = Number(studentData.score || 0);
+    let mistakesInBuilding = Number(buildingMistakes[building.id] || 0);
     let ejected = false;
-    let ejectReason = "";
-    let newActiveBuildingId = bId;
-    const updatedLocked = [...lockedBuildings];
-    const completedBuildings = [...(student.completedBuildings || [])];
 
     if (isCorrect) {
-      addedScore = question.points; // Pemula: 1, Menengah: 2, Mahir: 3
-      completedQuestions[questionId] = {
-        correct: true,
-        score: addedScore,
-        selectedOption,
-        buildingId: bId,
-        level,
-        timestamp: nowIso,
-      };
-
-      // Cek apakah seluruh 6 soal pada gedung ini sudah terjawab benar
-      const allBuildingQIds = [
-        ...building.levels.pemula.map((q) => q.id),
-        ...building.levels.menengah.map((q) => q.id),
-        ...building.levels.mahir.map((q) => q.id),
-      ];
-      const allSolved = allBuildingQIds.every((qid) => completedQuestions[qid]?.correct === true);
-      if (allSolved && !completedBuildings.includes(bId)) {
-        completedBuildings.push(bId);
+      if (!answeredCorrectIds.includes(question.id)) {
+        answeredCorrectIds.push(question.id);
+        currentScore = Math.min(100, currentScore + Number(question.points || 0));
       }
+      logs.unshift({
+        time: new Date().toISOString(),
+        buildingId: building.id,
+        buildingName: building.name,
+        level: question.level,
+        questionId: question.id,
+        result: "BENAR",
+        pointsEarned: Number(question.points || 0)
+      });
     } else {
-      wrongCount += 1;
-      wrongMap[bId] = wrongCount;
+      mistakesInBuilding += 1;
+      buildingMistakes[building.id] = mistakesInBuilding;
 
-      completedQuestions[questionId] = {
-        correct: false,
-        score: 0,
-        selectedOption,
-        buildingId: bId,
-        level,
-        timestamp: nowIso,
-      };
+      logs.unshift({
+        time: new Date().toISOString(),
+        buildingId: building.id,
+        buildingName: building.name,
+        level: question.level,
+        questionId: question.id,
+        result: timedOut ? "WAKTU HABIS" : "SALAH",
+        mistakesInBuilding
+      });
 
-      // Aturan: Salah 3x per gedung -> otomatis terlempar keluar & terkunci permanen
-      if (wrongCount >= MAX_WRONG_ATTEMPTS_PER_BUILDING) {
+      if (mistakesInBuilding >= 3) {
         ejected = true;
-        newActiveBuildingId = null;
-        if (!updatedLocked.includes(bId)) {
-          updatedLocked.push(bId);
+        if (!lockedBuildings.includes(building.id)) {
+          lockedBuildings.push(building.id);
         }
-        ejectReason = `Salah ${MAX_WRONG_ATTEMPTS_PER_BUILDING}x di Gedung ${bId}! Anda otomatis terlempar keluar dan tidak dapat masuk kembali.`;
       }
     }
 
-    const newTotalScore = Math.min(100, (student.totalScore || 0) + addedScore);
-    const optionLetter = String.fromCharCode(65 + selectedOption);
-    const logMessage = ejected
-      ? `SALAH ke-3 di Gedung ${bId} (${questionId}, pilih ${optionLetter}) -> OTOMATIS TERLEMPAR KELUAR`
-      : `Gedung ${bId} [${level}] ${questionId} pilih ${optionLetter}: ${isCorrect ? `BENAR (+${addedScore} poin)` : `SALAH (${wrongCount}/${MAX_WRONG_ATTEMPTS_PER_BUILDING})`}`;
+    const buildingCorrectCount = orderedQuestions.filter((q) =>
+      answeredCorrectIds.includes(q.id)
+    ).length;
+    const buildingCompleted = !ejected && buildingCorrectCount >= orderedQuestions.length;
 
-    await studentRef.update({
-      totalScore: newTotalScore,
-      activeBuildingId: newActiveBuildingId,
-      buildingWrongAttempts: wrongMap,
-      lockedBuildings: updatedLocked,
-      completedBuildings,
-      completedQuestions,
-      currentBuilding: bId,
-      currentLevel: level,
-      lastActive: nowIso,
-      activityLogs: [...prevLogs.slice(-39), { time: nowIso, event: logMessage }],
-    });
+    if (buildingCompleted && !completedBuildings.includes(building.id)) {
+      completedBuildings.push(building.id);
+    }
+
+    const nextActiveBuildingId = ejected || buildingCompleted ? null : building.id;
+
+    await studentDoc.ref.set(
+      {
+        score: currentScore,
+        completedBuildings,
+        lockedBuildings,
+        answeredCorrectIds,
+        buildingMistakes,
+        activeBuildingId: nextActiveBuildingId,
+        logs: logs.slice(0, 100),
+        lastActiveAt: new Date().toISOString()
+      },
+      { merge: true }
+    );
 
     return NextResponse.json({
-      correct: isCorrect,
-      addedScore,
-      totalScore: newTotalScore,
-      wrongAttemptsInBuilding: wrongCount,
-      remainingWrongAttempts: Math.max(0, MAX_WRONG_ATTEMPTS_PER_BUILDING - wrongCount),
+      success: true,
+      isCorrect,
+      timedOut,
+      explanation: question.explanation,
+      pointsEarned: isCorrect ? Number(question.points || 0) : 0,
+      timeDelta: isCorrect ? 3 : -3,
+      score: currentScore,
+      mistakesInBuilding,
+      remainingMistakes: Math.max(0, 3 - mistakesInBuilding),
       ejected,
-      ejectReason,
-      activeBuildingId: newActiveBuildingId,
+      buildingCompleted,
+      activeBuildingId: nextActiveBuildingId,
+      completedBuildings,
+      lockedBuildings
     });
   } catch (err) {
-    console.error("Submit Error:", err);
-    return NextResponse.json({ error: "Gagal memproses jawaban." }, { status: 500 });
+    console.error("Submit API Error:", err);
+    return NextResponse.json({ error: "Terjadi kesalahan pada server." }, { status: 500 });
   }
 }
