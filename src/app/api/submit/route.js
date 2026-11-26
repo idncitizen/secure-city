@@ -1,3 +1,7 @@
+import { NextResponse } from "next/server";
+import { getAdminDb } from "@/lib/firebaseAdmin";
+import { getBuildingById, getOrderedQuestions } from "@/lib/buildings";
+
 export async function GET(req) {
   try {
     const adminDb = getAdminDb();
