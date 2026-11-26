@@ -1,203 +1,179 @@
 "use client";
+
 import { useEffect, useRef } from "react";
 import * as THREE from "three";
 
+const BUILDING_LAYOUT = [
+  { id: 1, name: "Auth Tower", x: -16, z: -12, w: 5, h: 9, d: 5, color: 0x3b82f6 },
+  { id: 2, name: "SQL Vault", x: -5, z: -12, w: 6, h: 7, d: 5, color: 0x06b6d4 },
+  { id: 3, name: "API Gateway", x: 7, z: -12, w: 5, h: 8, d: 5, color: 0x6366f1 },
+  { id: 4, name: "Crypto Bank", x: 17, z: -12, w: 5, h: 10, d: 5, color: 0x8b5cf6 },
+  { id: 5, name: "Session Hub", x: -16, z: 0, w: 5, h: 6, d: 5, color: 0x10b981 },
+  { id: 6, name: "Cloud Core", x: 17, z: 0, w: 5, h: 9, d: 5, color: 0x0ea5e9 },
+  { id: 7, name: "XSS Studio", x: -16, z: 12, w: 5, h: 7, d: 5, color: 0xf59e0b },
+  { id: 8, name: "IDS Radar", x: -5, z: 12, w: 6, h: 8, d: 5, color: 0x14b8a6 },
+  { id: 9, name: "DevSecOps Lab", x: 7, z: 12, w: 5, h: 7, d: 5, color: 0xec4899 },
+  { id: 10, name: "SOC Citadel", x: 17, z: 12, w: 6, h: 11, d: 5, color: 0xef4444 },
+];
+
 export default function RobloxCityMap({
-  buildings,
-  completedQuestions,
-  visitedBuildings = [],
-  lockedBuildings = [],
-  activeBuildingId,
+  buildings = [],
+  selectedBuildingId,
   onSelectBuilding,
 }) {
-  const mountRef = useRef(null);
+  const containerRef = useRef(null);
+  const onSelectRef = useRef(onSelectBuilding);
+  onSelectRef.current = onSelectBuilding;
 
   useEffect(() => {
-    const container = mountRef.current;
+    const container = containerRef.current;
     if (!container) return;
 
-    const width = container.clientWidth;
-    const height = container.clientHeight;
-
     const scene = new THREE.Scene();
-    scene.background = new THREE.Color("#bae6fd");
-    scene.fog = new THREE.Fog("#bae6fd", 28, 65);
+    scene.background = new THREE.Color(0x090d16);
+    scene.fog = new THREE.FogExp2(0x090d16, 0.014);
 
-    const camera = new THREE.PerspectiveCamera(45, width / height, 0.1, 1000);
-    camera.position.set(0, 22, 26);
+    const width = container.clientWidth || 640;
+    const height = container.clientHeight || 420;
+
+    const camera = new THREE.PerspectiveCamera(45, width / height, 0.1, 160);
+    camera.position.set(0, 26, 30);
     camera.lookAt(0, 0, 0);
 
-    const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "low-power" });
+    const renderer = new THREE.WebGLRenderer({ antialias: true });
     renderer.setSize(width, height);
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+    renderer.shadowMap.enabled = true;
     container.appendChild(renderer.domElement);
 
-    scene.add(new THREE.AmbientLight(0xffffff, 0.75));
-    const dirLight = new THREE.DirectionalLight(0xffffff, 0.85);
-    dirLight.position.set(15, 30, 20);
+    const ambientLight = new THREE.AmbientLight(0xffffff, 0.75);
+    scene.add(ambientLight);
+
+    const dirLight = new THREE.DirectionalLight(0xffffff, 1.1);
+    dirLight.position.set(18, 32, 20);
+    dirLight.castShadow = true;
     scene.add(dirLight);
 
-    // Baseplate Hijau Roblox
-    const ground = new THREE.Mesh(
-      new THREE.BoxGeometry(38, 1, 30),
-      new THREE.MeshLambertMaterial({ color: "#4ade80" })
-    );
+    // Lantai kota blocky
+    const groundGeo = new THREE.BoxGeometry(52, 1, 40);
+    const groundMat = new THREE.MeshStandardMaterial({ color: 0x1e293b });
+    const ground = new THREE.Mesh(groundGeo, groundMat);
     ground.position.y = -0.5;
+    ground.receiveShadow = true;
     scene.add(ground);
 
-    // Jalan Kota
-    const mainRoad = new THREE.Mesh(
-      new THREE.BoxGeometry(34, 0.1, 4.5),
-      new THREE.MeshLambertMaterial({ color: "#334155" })
+    // Jalan grid
+    const roadMat = new THREE.MeshStandardMaterial({ color: 0x334155 });
+    const roadH = new THREE.Mesh(new THREE.BoxGeometry(48, 0.12, 3.2), roadMat);
+    roadH.position.set(0, 0.05, 6);
+    scene.add(roadH);
+
+    const roadV = new THREE.Mesh(new THREE.BoxGeometry(3.2, 0.12, 36), roadMat);
+    roadV.position.set(1, 0.05, 0);
+    scene.add(roadV);
+
+    const meshes = [];
+    const statusMap = new Map(
+      buildings.map((b) => [Number(b.buildingId ?? b.id), b])
     );
-    mainRoad.position.set(0, 0.05, -1);
-    scene.add(mainRoad);
 
-    const buildingMeshes = [];
+    BUILDING_LAYOUT.forEach((item) => {
+      const info = statusMap.get(item.id) || {};
+      const status = info.status || "available";
+      const isSelected = Number(selectedBuildingId) === item.id;
 
-    buildings.forEach((b) => {
-      const group = new THREE.Group();
-      const [bx, , bz] = b.position;
-      group.position.set(bx, 0, bz);
+      let color = item.color;
+      if (status === "completed") color = 0x22c55e;
+      else if (status === "locked" || status === "ejected") color = 0x475569;
 
-      const allQs = [...b.levels.pemula, ...b.levels.menengah, ...b.levels.mahir];
-      const solvedCount = allQs.filter((q) => completedQuestions[q.id]?.correct).length;
-      const isLocked = lockedBuildings.includes(b.id) || (visitedBuildings.includes(b.id) && activeBuildingId !== b.id);
-      const isActive = activeBuildingId === b.id;
+      const geo = new THREE.BoxGeometry(item.w, item.h, item.d);
+      const mat = new THREE.MeshStandardMaterial({
+        color,
+        emissive: isSelected ? 0x1d4ed8 : 0x000000,
+        emissiveIntensity: isSelected ? 0.5 : 0,
+        roughness: 0.45,
+      });
 
-      const baseMesh = new THREE.Mesh(
-        new THREE.BoxGeometry(4.2, 0.3, 4.2),
-        new THREE.MeshLambertMaterial({ color: isActive ? "#facc15" : "#cbd5e1" })
+      const mesh = new THREE.Mesh(geo, mat);
+      mesh.position.set(item.x, item.h / 2, item.z);
+      mesh.castShadow = true;
+      mesh.receiveShadow = true;
+      mesh.userData = { buildingId: item.id, baseY: item.h / 2 };
+
+      // Atap blocky khas gaya Roblox
+      const roof = new THREE.Mesh(
+        new THREE.BoxGeometry(item.w + 0.4, 0.6, item.d + 0.4),
+        new THREE.MeshStandardMaterial({ color: 0x0f172a })
       );
-      baseMesh.position.y = 0.15;
-      group.add(baseMesh);
+      roof.position.y = item.h / 2 + 0.3;
+      mesh.add(roof);
 
-      let bodyColor = b.color;
-      if (isLocked && solvedCount === 6) bodyColor = "#22c55e";
-      else if (isLocked) bodyColor = "#64748b";
-
-      const bodyMesh = new THREE.Mesh(
-        new THREE.BoxGeometry(3.4, b.height, 3.4),
-        new THREE.MeshLambertMaterial({ color: bodyColor })
-      );
-      bodyMesh.position.y = b.height / 2 + 0.3;
-      bodyMesh.userData = { buildingId: b.id };
-      group.add(bodyMesh);
-      buildingMeshes.push(bodyMesh);
-
-      const roofMesh = new THREE.Mesh(
-        new THREE.BoxGeometry(3.7, 0.4, 3.7),
-        new THREE.MeshLambertMaterial({ color: "#1e293b" })
-      );
-      roofMesh.position.y = b.height + 0.5;
-      group.add(roofMesh);
-
-      const beaconColor = isActive
-        ? "#38bdf8"
-        : isLocked
-        ? solvedCount === 6
-          ? "#22c55e"
-          : "#ef4444"
-        : "#facc15";
-
-      const beacon = new THREE.Mesh(
-        new THREE.BoxGeometry(1.1, 1.1, 1.1),
-        new THREE.MeshBasicMaterial({ color: beaconColor })
-      );
-      beacon.position.y = b.height + 1.5;
-      beacon.userData = { isBeacon: true, buildingId: b.id };
-      group.add(beacon);
-
-      scene.add(group);
+      scene.add(mesh);
+      meshes.push(mesh);
     });
 
     const raycaster = new THREE.Raycaster();
     const pointer = new THREE.Vector2();
-    let isDragging = false;
-    let prevX = 0;
-    let cameraAngle = 0;
 
-    const getX = (e) => (e.touches?.[0]?.clientX ?? e.clientX);
-
-    const handleDown = (e) => {
-      isDragging = false;
-      prevX = getX(e);
-    };
-
-    const handleMove = (e) => {
-      const x = getX(e);
-      if (Math.abs(x - prevX) > 6) {
-        isDragging = true;
-        cameraAngle -= (x - prevX) * 0.008;
-        camera.position.x = Math.sin(cameraAngle) * 26;
-        camera.position.z = Math.cos(cameraAngle) * 26;
-        camera.lookAt(0, 1, 0);
-        prevX = x;
-      }
-    };
-
-    const handleUp = (e) => {
-      if (isDragging) return;
+    const handlePointerDown = (event) => {
       const rect = renderer.domElement.getBoundingClientRect();
-      const clientX = e.changedTouches?.[0]?.clientX ?? e.clientX;
-      const clientY = e.changedTouches?.[0]?.clientY ?? e.clientY;
-
-      pointer.x = ((clientX - rect.left) / rect.width) * 2 - 1;
-      pointer.y = -((clientY - rect.top) / rect.height) * 2 + 1;
+      pointer.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+      pointer.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
 
       raycaster.setFromCamera(pointer, camera);
-      const intersects = raycaster.intersectObjects(buildingMeshes);
-      if (intersects.length > 0) {
-        onSelectBuilding(intersects[0].object.userData.buildingId);
+      const hits = raycaster.intersectObjects(meshes, false);
+      if (hits.length > 0 && typeof onSelectRef.current === "function") {
+        onSelectRef.current(hits[0].object.userData.buildingId);
       }
     };
 
-    const dom = renderer.domElement;
-    dom.addEventListener("mousedown", handleDown);
-    dom.addEventListener("mousemove", handleMove);
-    dom.addEventListener("mouseup", handleUp);
-    dom.addEventListener("touchstart", handleDown, { passive: true });
-    dom.addEventListener("touchmove", handleMove, { passive: true });
-    dom.addEventListener("touchend", handleUp);
+    renderer.domElement.addEventListener("pointerdown", handlePointerDown);
 
-    let animId;
+    const handleResize = () => {
+      if (!container) return;
+      const w = container.clientWidth || 640;
+      const h = container.clientHeight || 420;
+      camera.aspect = w / h;
+      camera.updateProjectionMatrix();
+      renderer.setSize(w, h);
+    };
+
+    window.addEventListener("resize", handleResize);
+
+    let frameId;
+    const clock = new THREE.Clock();
+
     const animate = () => {
-      animId = requestAnimationFrame(animate);
-      scene.traverse((obj) => {
-        if (obj.userData?.isBeacon) obj.rotation.y += 0.03;
+      frameId = requestAnimationFrame(animate);
+      const elapsed = clock.getElapsedTime();
+
+      meshes.forEach((m) => {
+        if (Number(selectedBuildingId) === m.userData.buildingId) {
+          m.position.y = m.userData.baseY + Math.sin(elapsed * 4) * 0.35;
+        } else {
+          m.position.y = m.userData.baseY;
+        }
       });
+
       renderer.render(scene, camera);
     };
     animate();
 
-    const handleResize = () => {
-      if (!container) return;
-      camera.aspect = container.clientWidth / container.clientHeight;
-      camera.updateProjectionMatrix();
-      renderer.setSize(container.clientWidth, container.clientHeight);
-    };
-    window.addEventListener("resize", handleResize);
-
     return () => {
-      cancelAnimationFrame(animId);
+      cancelAnimationFrame(frameId);
       window.removeEventListener("resize", handleResize);
-      dom.removeEventListener("mousedown", handleDown);
-      dom.removeEventListener("mousemove", handleMove);
-      dom.removeEventListener("mouseup", handleUp);
-      dom.removeEventListener("touchstart", handleDown);
-      dom.removeEventListener("touchmove", handleMove);
-      dom.removeEventListener("touchend", handleUp);
-      container.removeChild(dom);
+      renderer.domElement.removeEventListener("pointerdown", handlePointerDown);
       renderer.dispose();
+      if (renderer.domElement.parentNode === container) {
+        container.removeChild(renderer.domElement);
+      }
     };
-  }, [buildings, completedQuestions, visitedBuildings, lockedBuildings, activeBuildingId, onSelectBuilding]);
+  }, [buildings, selectedBuildingId]);
 
   return (
-    <div className="relative w-full h-[46vh] min-h-[300px] rounded-2xl overflow-hidden border-2 border-slate-700 shadow-xl">
-      <div ref={mountRef} className="w-full h-full cursor-grab active:cursor-grabbing" />
-      <div className="absolute top-3 left-3 bg-slate-900/85 text-white text-xs px-3 py-1.5 rounded-full backdrop-blur">
-        Geser putar kota • Kuning: Tersedia (1x masuk) • Abu/Merah: Terkunci/Selesai
-      </div>
-    </div>
+    <div
+      ref={containerRef}
+      className="w-full h-[380px] sm:h-[440px] rounded-2xl overflow-hidden border border-slate-800 bg-slate-950 cursor-pointer select-none"
+    />
   );
 }
