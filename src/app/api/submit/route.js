@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { adminDb } from "@/lib/firebaseAdmin";
+import { getAdminDb } from "@/lib/firebaseAdmin";
 import {
   BUILDINGS_DATA,
   MAX_WRONG_ATTEMPTS_PER_BUILDING,
@@ -14,7 +14,7 @@ export async function GET(req) {
   if (!nim || !token) {
     return NextResponse.json({ error: "Autentikasi diperlukan." }, { status: 401 });
   }
-
+  const adminDb = getAdminDb();
   const snap = await adminDb.collection("students").doc(nim).get();
   if (!snap.exists || snap.data().sessionToken !== token) {
     return NextResponse.json({ error: "Session token tidak valid atau sesi digantikan." }, { status: 401 });
@@ -46,7 +46,7 @@ export async function POST(req) {
     if (!nim || !token) {
       return NextResponse.json({ error: "Sesi tidak lengkap." }, { status: 401 });
     }
-
+    const adminDb = getAdminDb();
     const cleanNim = String(nim).trim().toUpperCase();
     const studentRef = adminDb.collection("students").doc(cleanNim);
     const snap = await studentRef.get();
