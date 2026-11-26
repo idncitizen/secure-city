@@ -1,83 +1,73 @@
 import { NextResponse } from "next/server";
-import { adminDb } from "@/lib/firebaseAdmin";
-import { BUILDINGS_DATA } from "@/lib/questionBank";
+import { getAdminDb } from "@/lib/firebaseAdmin";
 
-export async function POST(req) {
+export const dynamic = "force-dynamic";
+
+export async function GET(request) {
   try {
-    const { nim, sessionToken, buildingId } = await req.json();
-    const cleanNim = String(nim || "").trim().toUpperCase();
-    const bId = Number(buildingId);
+    const db = getAdminDb();
+    const { searchParams } = new URL(request.url);
+    const id = searchParams.get("id");
 
-    if (!cleanNim || !sessionToken || !bId) {
-      return NextResponse.json({ error: "Parameter masuk gedung tidak lengkap." }, { status: 400 });
+    // Contoh ambil data gedung dari Firestore
+    if (id) {
+      const docRef = db.collection("buildings").doc(id);
+      const snapshot = await docRef.get();
+
+      if (!snapshot.exists) {
+        return NextResponse.json(
+          { error: "Data gedung tidak ditemukan" },
+          { status: 404 }
+        );
+      }
+
+      return NextResponse.json({
+        id: snapshot.id,
+        ...snapshot.data(),
+      });
     }
 
-    const building = BUILDINGS_DATA.find((b) => b.id === bId);
-    if (!building) {
-      return NextResponse.json({ error: "Gedung tidak ditemukan." }, { status: 404 });
-    }
+    const querySnapshot = await db.collection("buildings").get();
+    const buildings = querySnapshot.docs.map((doc) => ({
+      id: doc.id,
+      ...doc.data(),
+    }));
 
-    const studentRef = adminDb.collection("students").doc(cleanNim);
-    const snap = await studentRef.get();
+    return NextResponse.json({ buildings });
+  } catch (error) {
+    console.error("Error di /api/building [GET]:", error);
+    return NextResponse.json(
+      {
+        error: "Gagal memproses data gedung di server",
+        details: error?.message || "Unknown error",
+      },
+      { status: 500 }
+    );
+  }
+}
 
-    if (!snap.exists || snap.data().sessionToken !== sessionToken) {
-      return NextResponse.json({ error: "Session token tidak valid." }, { status: 401 });
-    }
+export async function POST(request) {
+  try {
+    const db = getAdminDb();
+    const body = await request.json();
 
-    const student = snap.data();
-    const visited = student.visitedBuildings || [];
-    const locked = student.lockedBuildings || [];
-    const nowIso = new Date().toISOString();
-    const prevLogs = student.activityLogs || [];
-
-    // Jika sudah berada di dalam gedung ini, lanjutkan
-    if (student.activeBuildingId === bId) {
-      return NextResponse.json({ success: true, activeBuildingId: bId });
-    }
-
-    // Jika sedang berada di gedung lain dan belum menyelesaikan/keluar
-    if (student.activeBuildingId && student.activeBuildingId !== bId) {
+    // Sesuaikan validasi & penyimpanan data sesuai kebutuhan game/praktikum Anda
+    if (!body || typeof body !== "object") {
       return NextResponse.json(
-        { error: `Selesaikan atau keluar terlebih dahulu dari Gedung ${student.activeBuildingId}.` },
+        { error: "Payload tidak valid" },
         { status: 400 }
       );
     }
 
-    // Aturan: Hanya boleh memasuki gedung 1 kali & tidak boleh masuk ulang jika sudah gagal/terkunci
-    if (visited.includes(bId) || locked.includes(bId)) {
-      await studentRef.update({
-        lastActive: nowIso,
-        activityLogs: [
-          ...prevLogs.slice(-39),
-          { time: nowIso, event: `Percobaan masuk ulang Gedung ${bId} ditolak (akses 1x saja)` }
-        ],
-      });
-      return NextResponse.json(
-        { error: "Anda sudah pernah memasuki gedung ini atau kesempatan telah habis. Pilih gedung lain." },
-        { status: 403 }
-      );
-    }
-
-    const updatedVisited = [...visited, bId];
-    await studentRef.update({
-      activeBuildingId: bId,
-      currentBuilding: bId,
-      currentLevel: "pemula",
-      visitedBuildings: updatedVisited,
-      lastActive: nowIso,
-      activityLogs: [
-        ...prevLogs.slice(-39),
-        { time: nowIso, event: `Memasuki Gedung ${bId}: ${building.name}` }
-      ],
-    });
-
-    return NextResponse.json({
-      success: true,
-      activeBuildingId: bId,
-      visitedBuildings: updatedVisited,
-    });
-  } catch (err) {
-    console.error("Building Entry Error:", err);
-    return NextResponse.json({ error: "Gagal memasuki gedung." }, { status: 500 });
+    return NextResponse.json({ ok: true, received: body }, { status: 201 });
+  } catch (error) {
+    console.error("Error di /api/building [POST]:", error);
+    return NextResponse.json(
+      {
+        error: "Gagal menyimpan data gedung",
+        details: error?.message || "Unknown error",
+      },
+      { status: 500 }
+    );
   }
 }
