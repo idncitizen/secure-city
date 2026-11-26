@@ -5,6 +5,7 @@ import { getAvatarById } from "@/lib/avatars";
 
 export async function POST(req) {
   try {
+    const adminDb = getAdminDb();
     const body = await req.json();
     const { action, nim, nama, classCode, avatarId, sessionToken, adminKey } = body;
 
