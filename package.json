@@ -1,6 +1,22 @@
-"three": "^0.170.0",
+{
+  "name": "smart-secure-city",
+  "version": "0.2.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "next lint"
+  },
+  "dependencies": {
+    "next": "^15.1.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "three": "^0.170.0",
     "@types/three": "^0.170.0",
-    "firebase": "^11.0.0",
-    "firebase-admin": "^13.0.0",
+    "firebase": "^11.1.0",
+    "firebase-admin": "^13.0.1",
     "qrcode.react": "^4.2.0",
-    "lucide-react": "^0.460.0"
+    "lucide-react": "^0.468.0"
+  }
+}
