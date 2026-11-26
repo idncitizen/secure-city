@@ -3,7 +3,11 @@ import { getFirestore } from "firebase-admin/firestore";
 
 function normalizePrivateKey(rawKey) {
   if (!rawKey) return undefined;
-  return rawKey.replace(/\\n/g, "\n").replace(/^"|"$/g, "");
+  return rawKey
+    .trim()
+    .replace(/^["']|["']$/g, "")
+    .replace(/\\n/g, "\n")
+    .trim();
 }
 
 function getAdminApp() {
@@ -11,8 +15,8 @@ function getAdminApp() {
     return getApp();
   }
 
-  const projectId = process.env.FIREBASE_PROJECT_ID;
-  const clientEmail = process.env.FIREBASE_CLIENT_EMAIL;
+  const projectId = process.env.FIREBASE_PROJECT_ID?.trim();
+  const clientEmail = process.env.FIREBASE_CLIENT_EMAIL?.trim();
   const privateKey = normalizePrivateKey(process.env.FIREBASE_PRIVATE_KEY);
 
   if (projectId && clientEmail && privateKey) {
@@ -25,9 +29,9 @@ function getAdminApp() {
     });
   }
 
-  // Fallback jika berjalan di lingkungan GCP / emulator dengan ADC
   return initializeApp();
 }
 
-const adminApp = getAdminApp();
-export const adminDb = getFirestore(adminApp);
+export function getAdminDb() {
+  return getFirestore(getAdminApp());
+}
