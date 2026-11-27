@@ -51,24 +51,42 @@ export default function GamePage() {
   const [bannerMsg, setBannerMsg] = useState(null);
 
   useEffect(() => {
-    const raw = sessionStorage.getItem("secure_city_student");
-    if (!raw) {
+    const raw =
+      sessionStorage.getItem("secure_city_student") ||
+      localStorage.getItem("secure_city_student") ||
+      sessionStorage.getItem("smart_secure_city_session") ||
+      localStorage.getItem("smart_secure_city_session");
+
+    const fallbackToken =
+      sessionStorage.getItem("sessionToken") || localStorage.getItem("sessionToken");
+
+    if (!raw && !fallbackToken) {
       router.replace("/");
       return;
     }
+
     try {
-      const parsed = JSON.parse(raw);
-      setStudent({
+      const parsed = raw ? JSON.parse(raw) : { sessionToken: fallbackToken };
+      const resolvedAvatar =
+        ANIMAL_AVATARS.find(
+          (a) =>
+            a.id === parsed.avatarId ||
+            a.id === parsed.avatar?.id ||
+            a.emoji === parsed.avatar?.emoji
+        ) || ANIMAL_AVATARS[0];
+
+      const normalizedStudent = {
         score: 0,
         completedBuildings: [],
         lockedBuildings: [],
         buildingMistakes: {},
-        ...parsed
-      });
-      if (parsed.avatar) {
-        const match = ANIMAL_AVATARS.find((a) => a.id === parsed.avatar.id || a.emoji === parsed.avatar.emoji);
-        if (match) setSelectedAvatar(match);
-      }
+        ...parsed,
+        avatar: resolvedAvatar
+      };
+
+      setSelectedAvatar(resolvedAvatar);
+      setStudent(normalizedStudent);
+      sessionStorage.setItem("secure_city_student", JSON.stringify(normalizedStudent));
     } catch {
       router.replace("/");
     }
