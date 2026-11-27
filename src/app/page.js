@@ -30,7 +30,6 @@ function StudentLoginForm() {
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState("");
 
-  // Otomatis isi kode sesi jika mahasiswa memindai QR Code (?code=SEC-XXXXXX)
   useEffect(() => {
     const codeFromUrl = searchParams.get("code");
     if (codeFromUrl) {
@@ -73,7 +72,6 @@ function StudentLoginForm() {
         return;
       }
 
-      // Gabungkan respons server dengan data profil & avatar agar terbaca utuh di /game
       const resolvedAvatar =
         ANIMAL_AVATARS.find((a) => a.id === (data.avatarId || selectedAvatar.id)) ||
         selectedAvatar;
@@ -108,7 +106,6 @@ function StudentLoginForm() {
   return (
     <div className="min-h-screen w-full bg-gradient-to-br from-sky-100 via-teal-50 to-amber-50 flex items-center justify-center p-4 lg:p-8 text-slate-900">
       <div className="w-full max-w-4xl grid grid-cols-1 lg:grid-cols-12 rounded-3xl border border-sky-200 bg-white shadow-2xl overflow-hidden">
-        {/* Panel Kiri: Informasi Permainan */}
         <div className="lg:col-span-5 bg-gradient-to-br from-sky-600 via-teal-600 to-emerald-600 p-7 lg:p-8 text-white flex flex-col justify-between">
           <div>
             <div className="inline-flex items-center gap-2 rounded-full bg-white/15 px-3 py-1 text-xs font-bold backdrop-blur-xs">
@@ -156,7 +153,6 @@ function StudentLoginForm() {
           </div>
         </div>
 
-        {/* Panel Kanan: Formulir Masuk Mahasiswa */}
         <div className="lg:col-span-7 p-7 lg:p-8">
           <h2 className="text-xl font-extrabold text-slate-900">
             Masuk Sesi Mahasiswa
@@ -225,10 +221,65 @@ function StudentLoginForm() {
               </div>
             </div>
 
-            {/* Pilihan Avatar Hewan */}
             <div>
               <div className="flex items-center justify-between mb-2">
                 <label className="text-xs font-bold text-slate-700">
                   Pilih Avatar Karakter
                 </label>
-                <span className="text
+                <span className="text-xs font-extrabold text-sky-700">
+                  Terpilih: {selectedAvatar.emoji} {selectedAvatar.name}
+                </span>
+              </div>
+
+              <div className="grid grid-cols-4 sm:grid-cols-6 gap-2">
+                {ANIMAL_AVATARS.map((av) => {
+                  const isSelected = selectedAvatar.id === av.id;
+                  return (
+                    <button
+                      key={av.id}
+                      type="button"
+                      onClick={() => setSelectedAvatar(av)}
+                      className={`flex flex-col items-center justify-center rounded-2xl border-2 py-2 px-1 transition cursor-pointer ${
+                        isSelected
+                          ? "border-sky-500 bg-sky-50 shadow-xs scale-[1.03]"
+                          : "border-slate-200 bg-slate-50/70 hover:border-sky-300 hover:bg-white"
+                      }`}
+                    >
+                      <span className="text-2xl">{av.emoji}</span>
+                      <span className="mt-1 text-[10px] font-bold text-slate-700 truncate max-w-full px-1">
+                        {av.name}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            <button
+              type="submit"
+              disabled={loading}
+              className="w-full mt-2 inline-flex items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-sky-600 via-teal-600 to-emerald-600 py-3 text-sm font-extrabold text-white shadow-lg hover:brightness-105 disabled:opacity-60 transition cursor-pointer"
+            >
+              <LogIn className="h-4 w-4" />
+              {loading ? "Menghubungkan ke Kota..." : "Masuk ke Kota Permainan"}
+            </button>
+          </form>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export default function HomePage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="min-h-screen flex items-center justify-center bg-sky-50 text-slate-700 font-semibold">
+          Memuat halaman Smart Secure City...
+        </div>
+      }
+    >
+      <StudentLoginForm />
+    </Suspense>
+  );
+}
