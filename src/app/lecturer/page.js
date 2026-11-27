@@ -440,4 +440,306 @@ export default function LecturerDashboardPage() {
               <div className="overflow-x-auto">
                 <table className="w-full text-left border-collapse text-xs">
                   <thead>
-                    <tr className="border-b border-slate-200 text
+                    <tr className="border-b border-slate-200 text-slate-500 uppercase text-[11px]">
+                      <th className="py-3 px-3">Avatar</th>
+                      <th className="py-3 px-3">NIM</th>
+                      <th className="py-3 px-3">Nama</th>
+                      <th className="py-3 px-3">Poin</th>
+                      <th className="py-3 px-3">Gedung Dimasuki</th>
+                      <th className="py-3 px-3">Terkunci (Salah 3x)</th>
+                      <th className="py-3 px-3">Log</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {filteredStudents.map((s, idx) => {
+                      const completed = s.completedBuildings || [];
+                      const locked = s.lockedBuildings || [];
+                      const enteredCount = new Set([
+                        ...completed,
+                        ...locked,
+                        ...Object.keys(s.buildingMistakes || {})
+                      ]).size;
+
+                      return (
+                        <tr key={s.id || s.nim || idx} className="hover:bg-sky-50/50">
+                          <td className="py-3 px-3 text-lg">{s.avatar?.emoji || "🦊"}</td>
+                          <td className="py-3 px-3 font-mono font-semibold text-slate-700">
+                            {s.nim}
+                          </td>
+                          <td className="py-3 px-3 font-bold text-slate-900">{s.nama}</td>
+                          <td className="py-3 px-3 font-black text-amber-600">
+                            {Number(s.score || 0)}/100
+                          </td>
+                          <td className="py-3 px-3 font-semibold text-slate-700">
+                            {enteredCount}/10 (Aman: {completed.length})
+                          </td>
+                          <td className="py-3 px-3">
+                            {locked.length > 0 ? (
+                              <span className="inline-flex items-center gap-1 rounded-full bg-rose-100 px-2.5 py-0.5 text-[11px] font-bold text-rose-700">
+                                {locked.length} gedung
+                              </span>
+                            ) : (
+                              <span className="text-slate-400">-</span>
+                            )}
+                          </td>
+                          <td className="py-3 px-3">
+                            <button
+                              type="button"
+                              onClick={() => setSelectedStudent(s)}
+                              className="font-bold text-sky-600 hover:underline cursor-pointer"
+                            >
+                              Detail
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </section>
+          </>
+        ) : (
+          /* Menu Detail Sesi Sebelumnya */
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+            {/* Daftar Sesi Lama */}
+            <section className="lg:col-span-4 rounded-3xl border border-amber-200 bg-white p-5 shadow-md">
+              <div className="flex items-center gap-2 mb-3">
+                <History className="h-5 w-5 text-amber-600" />
+                <h2 className="text-base font-extrabold text-slate-900">
+                  Riwayat Sesi Kelas
+                </h2>
+              </div>
+              <p className="text-xs text-slate-500 mb-4">
+                Pilih sesi sebelumnya untuk melihat rekap nilai, Top 3, dan detail mahasiswa yang terpisah dari sesi aktif.
+              </p>
+
+              {previousSessions.length === 0 ? (
+                <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 p-4 text-xs text-slate-500">
+                  Belum ada sesi sebelumnya yang tersimpan. Sesi lama akan otomatis masuk ke daftar ini saat Anda menekan <strong>Ganti Sesi Baru</strong>.
+                </div>
+              ) : (
+                <div className="space-y-2.5">
+                  {previousSessions.map((ses) => {
+                    const isSelected = selectedHistorySession?.classCode === ses.classCode;
+                    const count = (ses.students || []).length;
+                    return (
+                      <button
+                        key={ses.classCode}
+                        type="button"
+                        onClick={() => setSelectedHistorySession(ses)}
+                        className={`w-full flex items-center justify-between gap-3 rounded-2xl border p-3.5 text-left transition cursor-pointer ${
+                          isSelected
+                            ? "border-amber-400 bg-amber-50/80 shadow-xs"
+                            : "border-slate-200 bg-slate-50/60 hover:border-sky-300"
+                        }`}
+                      >
+                        <div>
+                          <div className="font-extrabold text-sm text-slate-900">
+                            {ses.classCode}
+                          </div>
+                          <div className="text-[11px] text-slate-500">
+                            Peserta: {count} mahasiswa
+                          </div>
+                        </div>
+                        <ChevronRight className="h-4 w-4 text-slate-400 shrink-0" />
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+            </section>
+
+            {/* Rincian Sesi Terpilih */}
+            <section className="lg:col-span-8 rounded-3xl border border-sky-200 bg-white p-6 shadow-md space-y-5">
+              {!selectedHistorySession ? (
+                <p className="text-xs text-slate-500 py-8 text-center">
+                  Pilih salah satu sesi di sebelah kiri untuk melihat detailnya.
+                </p>
+              ) : (
+                <>
+                  <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 pb-4">
+                    <div>
+                      <span className="text-[11px] font-bold uppercase tracking-wider text-amber-600">
+                        Arsip Sesi Sebelumnya
+                      </span>
+                      <h3 className="text-xl font-black text-slate-900">
+                        Kode Sesi: {selectedHistorySession.classCode}
+                      </h3>
+                      <p className="text-xs text-slate-500">
+                        Total Peserta: {historyStudents.length} mahasiswa
+                      </p>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() =>
+                        exportCsvForList(historyStudents, selectedHistorySession.classCode)
+                      }
+                      className="inline-flex items-center gap-1.5 rounded-xl bg-emerald-600 px-4 py-2 text-xs font-extrabold text-white shadow-xs hover:bg-emerald-700 cursor-pointer"
+                    >
+                      <Download className="h-3.5 w-3.5" />
+                      Ekspor CSV Sesi Ini
+                    </button>
+                  </div>
+
+                  {/* Top 3 Sesi Sebelumnya */}
+                  <div>
+                    <h4 className="text-xs font-extrabold uppercase tracking-wider text-slate-600 mb-3">
+                      Top 3 Nilai Tertinggi Sesi {selectedHistorySession.classCode}
+                    </h4>
+                    {historyTopThree.length === 0 ? (
+                      <p className="text-xs text-slate-500">
+                        Tidak ada data mahasiswa pada sesi ini.
+                      </p>
+                    ) : (
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                        {historyTopThree.map((s, idx) => (
+                          <div
+                            key={s.id || s.nim || idx}
+                            className={`rounded-2xl border bg-gradient-to-br p-3.5 ${
+                              medalStyles[idx] || medalStyles[2]
+                            }`}
+                          >
+                            <div className="flex items-center justify-between text-xs font-black">
+                              <span>#{idx + 1}</span>
+                              <span>{Number(s.score || 0)}/100</span>
+                            </div>
+                            <div className="mt-2 font-extrabold text-sm truncate">
+                              {s.avatar?.emoji || "🦊"} {s.nama}
+                            </div>
+                            <div className="text-[11px] opacity-80">NIM: {s.nim}</div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Tabel Peserta Sesi Sebelumnya */}
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left border-collapse text-xs">
+                      <thead>
+                        <tr className="border-b border-slate-200 text-slate-500 uppercase text-[11px]">
+                          <th className="py-2.5 px-3">NIM</th>
+                          <th className="py-2.5 px-3">Nama</th>
+                          <th className="py-2.5 px-3">Poin</th>
+                          <th className="py-2.5 px-3">Gedung Aman</th>
+                          <th className="py-2.5 px-3">Log</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100">
+                        {historyStudents.map((s, i) => (
+                          <tr key={s.id || s.nim || i} className="hover:bg-slate-50">
+                            <td className="py-2.5 px-3 font-mono">{s.nim}</td>
+                            <td className="py-2.5 px-3 font-bold">{s.nama}</td>
+                            <td className="py-2.5 px-3 font-black text-amber-600">
+                              {Number(s.score || 0)}/100
+                            </td>
+                            <td className="py-2.5 px-3">
+                              {(s.completedBuildings || []).length}/10
+                            </td>
+                            <td className="py-2.5 px-3">
+                              <button
+                                type="button"
+                                onClick={() => setSelectedStudent(s)}
+                                className="font-bold text-sky-600 hover:underline cursor-pointer"
+                              >
+                                Detail
+                              </button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </>
+              )}
+            </section>
+          </div>
+        )}
+      </div>
+
+      {/* Konfirmasi Ganti Sesi Baru */}
+      {confirmNewSession && (
+        <div className="fixed inset-0 z-40 flex items-center justify-center bg-slate-900/50 p-4">
+          <div className="w-full max-w-md rounded-3xl bg-white p-6 shadow-xl border border-slate-200">
+            <h3 className="text-base font-extrabold text-slate-900">
+              Arsipkan & Buat Kode Sesi Baru?
+            </h3>
+            <p className="mt-2 text-xs text-slate-600">
+              Data sesi <strong>{classCode}</strong> akan dipisahkan ke menu{" "}
+              <strong>Detail Sesi Sebelumnya</strong> dan sesi aktif akan dimulai bersih dengan kode baru.
+            </p>
+            <div className="mt-5 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setConfirmNewSession(false)}
+                className="rounded-xl border border-slate-300 px-4 py-2 text-xs font-bold text-slate-700 cursor-pointer"
+              >
+                Batal
+              </button>
+              <button
+                type="button"
+                onClick={() => createOrRefreshSession(authorizedKey, true)}
+                className="rounded-xl bg-sky-600 px-4 py-2 text-xs font-extrabold text-white cursor-pointer"
+              >
+                Ya, Ganti Sesi
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal Detail Log Mahasiswa */}
+      {selectedStudent && (
+        <div className="fixed inset-0 z-40 flex items-center justify-center bg-slate-900/50 p-4">
+          <div className="w-full max-w-lg rounded-3xl bg-white p-6 shadow-xl border border-slate-200 max-h-[85vh] overflow-y-auto">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+              <div>
+                <h3 className="text-base font-extrabold text-slate-900">
+                  {selectedStudent.nama} ({selectedStudent.nim})
+                </h3>
+                <p className="text-xs text-slate-500">
+                  Skor: {Number(selectedStudent.score || 0)}/100 • Sesi:{" "}
+                  {selectedStudent.classCode || "-"}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setSelectedStudent(null)}
+                className="rounded-lg bg-slate-100 px-3 py-1 text-xs font-bold text-slate-700 cursor-pointer"
+              >
+                Tutup
+              </button>
+            </div>
+
+            <div className="mt-4 space-y-2">
+              {(selectedStudent.logs || []).length === 0 ? (
+                <p className="text-xs text-slate-500">Belum ada riwayat jawaban tercatat.</p>
+              ) : (
+                (selectedStudent.logs || []).map((log, i) => (
+                  <div
+                    key={i}
+                    className="flex items-center justify-between rounded-xl border border-slate-100 bg-slate-50 px-3 py-2 text-xs"
+                  >
+                    <div>
+                      <span className="font-bold text-slate-800">{log.buildingName}</span>{" "}
+                      <span className="text-slate-500">({log.level})</span>
+                    </div>
+                    <span
+                      className={`font-extrabold ${
+                        log.result === "BENAR" ? "text-emerald-600" : "text-rose-600"
+                      }`}
+                    >
+                      {log.result}
+                    </span>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
